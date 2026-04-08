@@ -1,0 +1,45 @@
+exchange:
+  name: binance          # ccxt exchange id (binance, coinbasepro, kraken, etc.)
+  sandbox: true          # Use testnet/sandbox when available — ALWAYS true until proven edge
+
+trading:
+  pairs:
+    - BTC/USDT
+    - ETH/USDT
+  timeframe: 1h          # Candle interval: 1m, 5m, 15m, 1h, 4h, 1d
+  starting_capital: 1000.0
+
+backtest:
+  fee_rate: 0.001        # 0.1% per trade (Binance taker fee — conservative)
+  slippage_rate: 0.0005  # 0.05% slippage estimate for liquid pairs
+  start_date: "2023-01-01"
+  end_date: "2025-12-31"
+
+risk:
+  max_position_pct: 0.20    # Max 20% of capital in any single position
+  max_drawdown_pct: 0.15    # Circuit breaker: stop all trading at 15% drawdown from peak
+  stop_loss_pct: 0.03       # 3% stop loss per trade
+  take_profit_pct: 0.06     # 6% take profit (2:1 reward:risk ratio)
+  max_open_positions: 3     # Maximum simultaneous open positions
+  risk_per_trade_pct: 0.01  # Risk 1% of equity per trade (position sizing)
+
+strategies:
+  bollinger_rsi:
+    bb_period: 20           # Bollinger Band lookback period
+    bb_std: 2.0             # Bollinger Band standard deviation multiplier
+    rsi_period: 14          # RSI lookback period
+    rsi_oversold: 30        # RSI level to trigger buy signal
+    rsi_overbought: 70      # RSI level to trigger sell signal
+
+  momentum:
+    fast_ma: 10             # Fast SMA period
+    slow_ma: 30             # Slow SMA period
+    trend_ma: 200           # Long-term trend filter SMA period
+    atr_period: 14          # ATR period for stop loss calculation
+    atr_stop_multiplier: 2.0  # Stop = entry - (ATR * multiplier)
+
+  grid:
+    grid_levels: 10         # Number of buy/sell grid levels
+    grid_spread_pct: 0.02   # 2% price distance between grid levels
+    pair: BTC/USDT          # Grid works best focused on one pair
+    range_pct: 0.10         # Total grid range as % of price (5% above and below)
