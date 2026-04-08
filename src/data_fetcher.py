@@ -45,17 +45,20 @@ class DataFetcher:
         self._exchange = self._init_exchange()
 
     def _init_exchange(self) -> ccxt.Exchange:
-        """Create and configure the CCXT exchange instance."""
+        """
+        Create and configure the CCXT exchange instance.
+
+        Note: Sandbox mode is NOT applied here. The data fetcher only reads
+        public market data (OHLCV), which doesn't require authentication or
+        sandbox. Sandbox mode is only applied by the live/paper trader when
+        placing orders.
+        """
         exchange_class = getattr(ccxt, self.exchange_name)
         exchange = exchange_class({
             "enableRateLimit": True,  # Automatically respect rate limits
         })
 
-        if self.sandbox and exchange.has.get("sandbox"):
-            exchange.set_sandbox_mode(True)
-            logger.info(f"Using sandbox mode for {self.exchange_name}")
-
-        logger.info(f"Initialized exchange: {self.exchange_name}")
+        logger.info(f"Initialized exchange: {self.exchange_name} (public data only)")
         return exchange
 
     def fetch_historical(self, pair: str, timeframe: str,

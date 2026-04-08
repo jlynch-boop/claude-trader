@@ -213,6 +213,63 @@ class Database:
 
         return row["latest"] if row and row["latest"] is not None else None
 
+    def export_ohlcv_csv(self, pair: str, timeframe: str,
+                         output_path: str,
+                         exchange: str = "binance") -> int:
+        """
+        Export OHLCV data to a CSV file for offline use and git storage.
+
+        Args:
+            pair:        Trading pair (e.g. "BTC/USDT")
+            timeframe:   Candle interval (e.g. "1h")
+            output_path: Full path for the output CSV file
+            exchange:    Exchange name (default "binance")
+
+        Returns:
+            Number of rows exported.
+        """
+        df = self.get_ohlcv(pair, timeframe, exchange=exchange)
+        if df.empty:
+            logger.warning(f"No data to export for {pair} {timeframe}")
+            return 0
+
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        df.to_csv(output_path)
+        logger.info(f"Exported {len(df)} rows to {output_path}")
+        return len(df)
+
+    def import_ohlcv_csv(self, csv_path: str, exchange: str, pair: str,
+                         timeframe: str) -> int:
+        """
+        Import OHLCV data from a CSV file into the database.
+
+        Used to seed the database from committed CSV files without
+        needing to re-fetch from the exchange.
+
+        Args:
+            csv_path:  Path to the CSV file (exported by export_ohlcv_csv)
+            exchange:  Exchange name (e.g. "binance")
+            pair:      Trading pair (e.g. "BTC/USDT")
+            timeframe: Candle interval (e.g. "1h")
+
+        Returns:
+            Number of new rows inserted.
+        """
+        df = pd.read_csv(csv_path, index_col=0, parse_dates=True)
+        if df.empty:
+            return 0
+
+        # Convert datetime index back to millisecond timestamps
+        rows = []
+        for dt, row in df.iterrows():
+            ts_ms = int(pd.Timestamp(dt).timestamp() * 1000)
+            rows.append([ts_ms, row["open"], row["high"],
+                         row["low"], row["close"], row["volume"]])
+
+        inserted = self.insert_ohlcv(exchange, pair, timeframe, rows)
+        logger.info(f"Imported {inserted} rows from {csv_path}")
+        return inserted
+
     # -------------------------------------------------------------------------
     # Trade methods
     # -------------------------------------------------------------------------

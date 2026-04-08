@@ -1,11 +1,14 @@
 # Environment variables (NEVER commit API keys)
 .env
 
-# Data and logs (large files, machine-specific)
-data/
+# Data and logs
 logs/
 *.db
 *.sqlite
+
+# Data directory: ignore everything except seed CSVs
+data/*
+!data/*.csv
 
 # Python
 __pycache__/
