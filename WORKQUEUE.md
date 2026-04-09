@@ -73,36 +73,37 @@ and resumes from the first unchecked `[ ]` item.
 **Goal:** Walk-forward validation to prove (or disprove) edge. Paper trading with live data.
 
 ### Walk-Forward Validation
-- [ ] `src/walk_forward.py` — walk-forward validator
+- [x] `src/walk_forward.py` — walk-forward validator
   - Split data into N sequential windows (default 5)
   - Each window: 70% in-sample, 30% out-of-sample
   - Run backtest on each split, compare IS vs OOS metrics
   - Flag if OOS Sharpe degrades >50% vs IS (overfitting warning)
   - Return aggregate OOS metrics
-- [ ] `tests/test_walk_forward.py` — verify data splitting, no leakage
-- [ ] `scripts/run_walk_forward.py` — CLI entry point
-- [ ] Run walk-forward on all 3 strategies, record results here:
-  - `bollinger_rsi`: OOS Sharpe = TBD
-  - `momentum`: OOS Sharpe = TBD
-  - `grid`: OOS Sharpe = TBD
-- [ ] **Gate:** Only advance strategies with OOS Sharpe > 1.0 and max drawdown < 20%
+- [x] `tests/test_walk_forward.py` — 20 tests, all passing
+- [x] `scripts/run_walk_forward.py` — CLI entry point
+- [x] Run walk-forward on all 3 strategies, record results here:
+  - `bollinger_rsi`: OOS Sharpe = -0.315 (3/5 overfit warnings)
+  - `momentum`: OOS Sharpe = -1.566 (3/5 overfit warnings)
+  - `grid`: OOS Sharpe = -0.373 (2/5 overfit warnings)
+- [x] **Gate:** All fail on synthetic GBM data (expected — random data has no edge)
 
 ### Paper Trading
-- [ ] `src/paper_trader.py` — live data + simulated execution
+- [x] `src/paper_trader.py` — live data + simulated execution
   - Fetches latest candle on each timeframe tick
   - Passes through strategy + risk manager
   - Simulates fill (with slippage/fees)
   - Logs all trades to SQLite
   - Updates portfolio snapshots
-- [ ] `scripts/run_paper_trader.py` — CLI: `python scripts/run_paper_trader.py --strategy bollinger_rsi`
+  - `--simulate` mode replays historical data (no internet needed)
+- [x] `scripts/run_paper_trader.py` — CLI: `python scripts/run_paper_trader.py --strategy bollinger_rsi --simulate`
 
 ### Dashboard
-- [ ] `src/dashboard.py` — performance monitoring
+- [x] `src/dashboard.py` — performance monitoring
   - Terminal mode: tabulate table of current P&L, recent trades, metrics
   - Chart mode (`--chart`): equity curve, trade markers, monthly returns
-- [ ] `scripts/run_dashboard.py` — CLI entry point
+- [x] `scripts/run_dashboard.py` — CLI entry point
 
-**Phase 3 Status:** Not started. Requires Phase 2 complete.
+**Phase 3 Status: COMPLETE** ✓ (125/125 tests passing)
 
 ---
 
@@ -148,11 +149,17 @@ important test is whether the walk-forward validator correctly identifies
 that there is no stable edge in random data (it should fail consistently).
 
 ## Walk-Forward Results Log
-*(filled in during Phase 3)*
+*(on synthetic GBM seed data, 5 splits, 70% IS / 30% OOS)*
 
-| Strategy | OOS Sharpe | OOS Max DD | IS vs OOS Degradation | Passes Gate? |
-|----------|------------|------------|----------------------|--------------|
-| TBD | | | | |
+| Strategy | OOS Sharpe | OOS Max DD | Overfit Warnings | Passes Gate? |
+|----------|------------|------------|-----------------|--------------|
+| bollinger_rsi | -0.315 | 3.03% | 3/5 | FAIL |
+| momentum | -1.566 | 3.27% | 3/5 | FAIL |
+| grid | -0.373 | 5.74% | 2/5 | FAIL |
+
+**Analysis:** All three fail on synthetic data — correct behavior. GBM data has no
+patterns to exploit. When run on real exchange data, results should differ significantly.
+The validator correctly diagnoses "no edge" in random data.
 
 ## Paper Trading Log
 *(filled in during Phase 3)*
