@@ -186,7 +186,8 @@ class PaperTrader:
         warmup = self.strategy.required_history()
 
         # Load the full history for simulation (not just the warmup tail)
-        all_data = self.db.get_ohlcv(self.pair, self.timeframe)
+        all_data = self.db.get_ohlcv(self.pair, self.timeframe,
+                                      exchange=self.config["exchange"]["name"])
         if all_data.empty:
             logger.error("No historical data in database. Run generate_seed_data.py first.")
             return

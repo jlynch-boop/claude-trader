@@ -149,7 +149,7 @@ class Database:
 
     def get_ohlcv(self, pair: str, timeframe: str,
                   start_date: str = None, end_date: str = None,
-                  exchange: str = "binance") -> pd.DataFrame:
+                  exchange: str = None) -> pd.DataFrame:
         """
         Retrieve OHLCV data as a DataFrame.
 
@@ -158,18 +158,27 @@ class Database:
             timeframe:  Candle interval (e.g. "1h")
             start_date: Optional start date string "YYYY-MM-DD" (inclusive)
             end_date:   Optional end date string "YYYY-MM-DD" (inclusive)
-            exchange:   Exchange name (default "binance")
+            exchange:   Exchange name filter (default None = any exchange).
+                        Pass cfg["exchange"]["name"] to use a specific source.
 
         Returns:
             DataFrame with columns [open, high, low, close, volume],
             indexed by UTC datetime. Empty DataFrame if no data found.
         """
-        sql = """
-            SELECT timestamp, open, high, low, close, volume
-            FROM ohlcv
-            WHERE exchange = ? AND pair = ? AND timeframe = ?
-        """
-        params = [exchange, pair, timeframe]
+        if exchange is not None:
+            sql = """
+                SELECT timestamp, open, high, low, close, volume
+                FROM ohlcv
+                WHERE exchange = ? AND pair = ? AND timeframe = ?
+            """
+            params = [exchange, pair, timeframe]
+        else:
+            sql = """
+                SELECT timestamp, open, high, low, close, volume
+                FROM ohlcv
+                WHERE pair = ? AND timeframe = ?
+            """
+            params = [pair, timeframe]
 
         if start_date:
             start_ts = _date_str_to_ts(start_date)
@@ -215,7 +224,7 @@ class Database:
 
     def export_ohlcv_csv(self, pair: str, timeframe: str,
                          output_path: str,
-                         exchange: str = "binance") -> int:
+                         exchange: str = None) -> int:
         """
         Export OHLCV data to a CSV file for offline use and git storage.
 
@@ -223,7 +232,7 @@ class Database:
             pair:        Trading pair (e.g. "BTC/USDT")
             timeframe:   Candle interval (e.g. "1h")
             output_path: Full path for the output CSV file
-            exchange:    Exchange name (default "binance")
+            exchange:    Exchange name filter (default None = any exchange)
 
         Returns:
             Number of rows exported.

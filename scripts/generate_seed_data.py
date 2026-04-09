@@ -235,7 +235,7 @@ def main():
             rows.append([ts_ms, row["open"], row["high"],
                          row["low"], row["close"], row["volume"]])
 
-        inserted = db.insert_ohlcv("binance", pair, "1h", rows)
+        inserted = db.insert_ohlcv(cfg["exchange"]["name"], pair, "1h", rows)
         logger.info(f"  Inserted {inserted} candles into database")
 
         # Export to CSV (safe filename: BTC/USDT → BTC_USDT)

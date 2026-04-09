@@ -47,11 +47,13 @@ def run_one(strategy_name: str, pair: str, start: str, end: str,
         )
 
     df = db.get_ohlcv(pair, cfg["trading"]["timeframe"],
-                      start_date=start, end_date=end)
+                      start_date=start, end_date=end,
+                      exchange=cfg["exchange"]["name"])
     if df.empty:
         raise RuntimeError(
-            f"No data for {pair}. "
-            "Run: python scripts/generate_seed_data.py"
+            f"No data for {pair} on {cfg['exchange']['name']}. "
+            "Run: python scripts/generate_seed_data.py  (synthetic)\n"
+            "  OR: python scripts/fetch_data.py --pair BTC/USDT  (real data)"
         )
 
     strategy_cls = STRATEGIES[strategy_name]

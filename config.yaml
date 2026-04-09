@@ -1,5 +1,5 @@
 exchange:
-  name: binance          # ccxt exchange id (binance, coinbasepro, kraken, etc.)
+  name: kraken            # US-friendly: no geo-restrictions, works without API keys for public data
   sandbox: true          # Use testnet/sandbox when available — ALWAYS true until proven edge
 
 trading:
@@ -10,7 +10,7 @@ trading:
   starting_capital: 1000.0
 
 backtest:
-  fee_rate: 0.001        # 0.1% per trade (Binance taker fee — conservative)
+  fee_rate: 0.0026       # 0.26% Kraken taker fee (slightly higher than Binance)
   slippage_rate: 0.0005  # 0.05% slippage estimate for liquid pairs
   start_date: "2023-01-01"
   end_date: "2025-12-31"
