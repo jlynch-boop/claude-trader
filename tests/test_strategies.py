@@ -36,6 +36,8 @@ def config():
             "bollinger_rsi": {
                 "bb_period": 20, "bb_std": 2.0,
                 "rsi_period": 14, "rsi_oversold": 30, "rsi_overbought": 70,
+                "atr_period": 14, "atr_stop_multiplier": 3.0,
+                "trend_ma": 0,   # disabled so test signals aren't filtered
             },
             "momentum": {
                 "fast_ma": 10, "slow_ma": 30, "trend_ma": 50,

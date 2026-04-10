@@ -130,39 +130,59 @@ and resumes from the first unchecked `[ ]` item.
 
 ---
 
-## Backtest Results Log
-*(on synthetic GBM seed data, 2023-01-01 → 2025-12-31, BTC/USDT 1h, $1,000 capital)*
+## Backtest Results Log (Real CryptoCompare Data)
+*(BTC/USDT 1h, 2024-04-10 → 2026-04-10, $1,000 capital, Kraken fees 0.26%)*
 
+### Hourly data — original strategies
 | Strategy | Sharpe | Max DD | Win Rate | Profit Factor | Trades | Gate |
 |----------|--------|--------|----------|---------------|--------|------|
-| bollinger_rsi | -0.332 | 9.85% | 31.5% | 1.086 | 146 | FAIL |
-| momentum | -1.158 | 15.02% | 31.0% | 0.843 | 116 | FAIL |
-| grid | -1.495 | 15.44% | 66.5% | 0.816 | 209 | FAIL |
+| bollinger_rsi (no trend filter, 1.5×ATR stop) | -1.137 | 9.72% | 25.1% | 0.871 | 171 | FAIL |
+| momentum (trend_ma=50) | -2.986 | 15.06% | 24.3% | 0.516 | 148 | FAIL |
+| grid (range_pct=0.20) | -1.499 | 7.12% | 65.8% | 0.739 | 122 | FAIL |
 
-**Analysis:** All three fail the gate on synthetic data. This is expected —
-GBM data has no exploitable patterns (it's mathematically random). The real
-test is on live exchange data. Note that all strategies kept drawdown within
-the 20% limit, which confirms the risk manager is working correctly.
+### Daily resampled — corrected Sharpe (rfr=0%)
+| Strategy | Sharpe | Max DD | Ann. Return | Profit Factor | Trades | Gate |
+|----------|--------|--------|-------------|---------------|--------|------|
+| bollinger_rsi (trend_ma=50, rsi<30) | — | — | — | — | 0 | FAIL (0 signals: trend filter blocks all) |
+| momentum (fast=10, slow=30) | 0.272 | 4.99% | +1.09% | 1.260 | 12 | FAIL (too few trades) |
+| **grid (range_pct=0.20)** | **0.733** | **3.63%** | **+3.29%** | **1.477** | **49** | **closest to passing** |
 
-**Next step:** Phase 3 walk-forward validation will use the same data; the
-important test is whether the walk-forward validator correctly identifies
-that there is no stable edge in random data (it should fail consistently).
+**Analysis (real data):**
+- **Grid on daily BTC is the best performer**: +6.68% total over 2 years, 75.5% win rate, PF 1.477
+- **Root cause of failures**: 2024-2026 BTC had a massive bull run to ATH ($100k+) then correction — challenging for all mechanical strategies
+- **BollingerRSI design flaw discovered**: RSI<30 + price at lower BB is ALWAYS below the SMA trend filter (contradictory conditions). Disabled trend filter = -10.73% return. Strategy needs rethinking.
+- **Momentum needs more trades**: fast_ma=10/slow_ma=30 on daily only crosses ~6 times per year. Need shorter MAs.
+- **Metrics fix applied**: Corrected `annualized_return` to use calendar time (was using hardcoded `/8760`); Sharpe now auto-detects periods_per_year from equity curve index; risk-free rate set to 0% (correct for crypto)
 
-## Walk-Forward Results Log
-*(on synthetic GBM seed data, 5 splits, 70% IS / 30% OOS)*
+**Key finding:** No strategy fully passes the gate on 2024-2026 BTC data. The market regime (strong bull run then correction) is hostile to mean reversion and ranging strategies. The test period is genuinely difficult — this is valuable information, not a code bug.
+
+## Walk-Forward Results Log (Real Data, Daily Resampled)
+*(BTC/USDT, 5 splits, 70% IS / 30% OOS, daily candles from 1h resample)*
 
 | Strategy | OOS Sharpe | OOS Max DD | Overfit Warnings | Passes Gate? |
 |----------|------------|------------|-----------------|--------------|
-| bollinger_rsi | -0.315 | 3.03% | 3/5 | FAIL |
-| momentum | -1.566 | 3.27% | 3/5 | FAIL |
-| grid | -0.373 | 5.74% | 2/5 | FAIL |
+| bollinger_rsi | N/A | N/A | N/A | FAIL (0 trades) |
+| momentum | N/A | N/A | N/A | FAIL (0 trades) |
+| grid | -0.861 | 1.3% | 2/5 | FAIL (only 14 OOS trades total) |
 
-**Analysis:** All three fail on synthetic data — correct behavior. GBM data has no
-patterns to exploit. When run on real exchange data, results should differ significantly.
-The validator correctly diagnoses "no edge" in random data.
+**Analysis:** Walk-forward inconclusive for Grid due to too few OOS trades (14 total = ~3 per window). Window 1 shows OOS Sharpe +1.399 (promising). Subsequent windows have too few trades to be statistically meaningful.
+
+## Improvements Made (Strategy Parameter Tuning Session)
+1. **BollingerRSI**: Added ATR-based stop (3×ATR), take-profit (6×ATR = 2:1 R:R), trend filter (trend_ma param)
+2. **Momentum**: Reduced trend_ma from 200 to 50 (200 hours = only 8 days, too slow to warm up)
+3. **Grid**: Widened range_pct from 0.10 to 0.20 (10% range was blown out in volatile markets)
+4. **Infrastructure**: Added `--resample 1D` to backtest/walk-forward scripts for daily testing
+5. **Metrics fix**: Corrected annualization for any timeframe, set rfr=0% for crypto
+
+## Next Session Priority: Strategy Redesign
+[ ] Try shorter MA periods for Momentum on daily (fast_ma=5, slow_ma=15) → more trades
+[ ] Redesign BollingerRSI: remove impossible trend filter, try faster exit (target middle BB instead of 6×ATR)
+[ ] Consider fetching older historical data (2020-2023) via CryptoCompare for longer test period
+[ ] Implement regime detection (ADX filter) for Grid: only trade when ADX < 25 (ranging market)
+[ ] Try Grid on a longer historical period where BTC ranged more
 
 ## Paper Trading Log
-*(filled in during Phase 3)*
+*(requires gate passage first — currently no strategy fully passes)*
 
 | Strategy | Start Date | Days Run | P&L | Sharpe | Max DD | Pass? |
 |----------|------------|----------|-----|--------|--------|-------|

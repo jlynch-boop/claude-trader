@@ -26,7 +26,7 @@ from src.walk_forward import WalkForwardValidator
 from src.strategy_bollinger_rsi import BollingerRsiStrategy
 from src.strategy_momentum import MomentumStrategy
 from src.strategy_grid import GridStrategy
-from src.utils import get_logger
+from src.utils import get_logger, resample_ohlcv
 
 logger = get_logger(__name__)
 
@@ -38,7 +38,8 @@ STRATEGIES = {
 
 
 def run_one(strategy_name: str, pair: str, start: str, end: str,
-            cfg: dict, db: Database, n_splits: int, is_ratio: float) -> dict:
+            cfg: dict, db: Database, n_splits: int, is_ratio: float,
+            resample: str | None = None) -> dict:
     """Run walk-forward validation for one strategy. Returns summary dict."""
     if strategy_name not in STRATEGIES:
         raise ValueError(
@@ -55,6 +56,10 @@ def run_one(strategy_name: str, pair: str, start: str, end: str,
             "Run: python scripts/generate_seed_data.py  (synthetic)\n"
             "  OR: python scripts/fetch_data.py --pair BTC/USDT  (real data)"
         )
+
+    if resample:
+        df = resample_ohlcv(df, resample)
+        logger.info(f"Resampled to {resample}: {len(df)} candles")
 
     strategy_cls = STRATEGIES[strategy_name]
     validator    = WalkForwardValidator(
@@ -110,6 +115,12 @@ def main():
         default=0.70,
         help="Fraction of each window used for in-sample (default: 0.70)",
     )
+    parser.add_argument(
+        "--resample",
+        default=None,
+        metavar="FREQ",
+        help="Resample hourly data before validating (e.g. '1D' for daily candles)",
+    )
 
     args = parser.parse_args()
 
@@ -134,7 +145,8 @@ def main():
         logger.info(f"Walk-forward: {name} on {pair}")
         logger.info(f"{'='*64}")
         try:
-            summary = run_one(name, pair, start, end, cfg, db, n_splits, is_ratio)
+            summary = run_one(name, pair, start, end, cfg, db, n_splits, is_ratio,
+                              resample=args.resample)
             all_summaries.append(summary)
         except Exception as e:
             logger.error(f"Walk-forward failed for {name}: {e}")

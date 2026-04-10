@@ -21,7 +21,7 @@ from src.backtest_metrics import BacktestMetrics
 from src.strategy_bollinger_rsi import BollingerRsiStrategy
 from src.strategy_momentum import MomentumStrategy
 from src.strategy_grid import GridStrategy
-from src.utils import get_logger
+from src.utils import get_logger, resample_ohlcv
 
 logger = get_logger(__name__)
 
@@ -33,7 +33,8 @@ STRATEGIES = {
 
 
 def run_one(strategy_name: str, pair: str, start: str, end: str,
-            cfg: dict, db: Database, chart: bool = False) -> dict:
+            cfg: dict, db: Database, chart: bool = False,
+            resample: str | None = None) -> dict:
     """Run a single backtest and return the summary dict."""
     if strategy_name not in STRATEGIES:
         raise ValueError(
@@ -48,6 +49,14 @@ def run_one(strategy_name: str, pair: str, start: str, end: str,
         raise RuntimeError(
             f"No data for {pair}. "
             "Run: python scripts/generate_seed_data.py"
+        )
+
+    if resample:
+        original_len = len(df)
+        df = resample_ohlcv(df, resample)
+        logger.info(
+            f"Resampled {original_len} hourly candles → {len(df)} "
+            f"{resample} candles"
         )
 
     strategy = STRATEGIES[strategy_name](cfg)
@@ -98,6 +107,16 @@ def main():
         action="store_true",
         help="Save equity curve chart to data/",
     )
+    parser.add_argument(
+        "--resample",
+        default=None,
+        metavar="FREQ",
+        help=(
+            "Resample hourly data before backtesting. "
+            "E.g. '1D' converts to daily candles. "
+            "Use this with daily-calibrated strategy params."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -120,7 +139,8 @@ def main():
         logger.info(f"Running backtest: {name} on {pair}")
         logger.info(f"{'='*56}")
         try:
-            summary = run_one(name, pair, start, end, cfg, db, args.chart)
+            summary = run_one(name, pair, start, end, cfg, db, args.chart,
+                              resample=args.resample)
             all_summaries.append(summary)
         except Exception as e:
             logger.error(f"Backtest failed for {name}: {e}")

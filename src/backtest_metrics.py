@@ -44,14 +44,36 @@ GATE_MIN_PF        = 1.3    # Profit factor
 class BacktestMetrics:
     """Computes and presents performance metrics from a BacktestResult."""
 
-    # Hourly data: annualize by multiplying by sqrt(8760 hours/year)
-    ANNUALIZATION_FACTOR = math.sqrt(8760)
-
     def __init__(self, result: BacktestResult):
         self.result  = result
         self.trades  = result.trades
         self.equity  = result.equity_curve
         self._cache: dict = {}
+
+    def _periods_per_year(self) -> float:
+        """
+        Detect how many equity-curve periods fit in one year.
+
+        This is needed to annualize returns and Sharpe correctly regardless
+        of whether the data is hourly, 4h, daily, etc.
+
+        Uses the median time-step of the equity index so that occasional
+        gaps (weekends, data holes) don't skew the result.
+        """
+        if len(self.equity) < 2:
+            return 8760.0  # fallback: assume hourly
+        deltas = self.equity.index.to_series().diff().dropna()
+        if deltas.empty:
+            return 8760.0
+        median_hours = deltas.median().total_seconds() / 3600
+        if median_hours <= 0:
+            return 8760.0
+        return 8760.0 / median_hours  # 1h→8760, 4h→2190, 24h→365
+
+    @property
+    def ANNUALIZATION_FACTOR(self) -> float:
+        """sqrt(periods_per_year) — correct for any candle frequency."""
+        return math.sqrt(self._periods_per_year())
 
     # -------------------------------------------------------------------------
     # Core metrics
@@ -66,28 +88,33 @@ class BacktestMetrics:
     def annualized_return(self) -> float:
         """
         Compound annual growth rate (CAGR).
-        Accounts for the actual duration of the backtest.
+        Uses the actual calendar duration so it's correct for any timeframe.
         """
         if self.equity.empty or len(self.equity) < 2:
             return 0.0
-        n_years = len(self.equity) / 8760  # hours → years
+        total_seconds = (
+            self.equity.index[-1] - self.equity.index[0]
+        ).total_seconds()
+        n_years = total_seconds / (365.25 * 24 * 3600)
         if n_years <= 0:
             return 0.0
         total = self.total_return()
         return (1 + total) ** (1 / n_years) - 1
 
-    def sharpe_ratio(self, risk_free_rate: float = 0.04) -> float:
+    def sharpe_ratio(self, risk_free_rate: float = 0.0) -> float:
         """
         Annualized Sharpe ratio.
 
-        Sharpe = (mean_hourly_return - risk_free_hourly) / std_hourly_return
-                 * sqrt(8760)
+        Sharpe = (mean_period_return - risk_free_period) / std_period_return
+                 * sqrt(periods_per_year)
 
         A Sharpe > 1.0 means the strategy earns more than 1 unit of return
         per unit of risk. Industry standard: > 1.0 is acceptable, > 2.0 is good.
 
         Args:
-            risk_free_rate: Annual risk-free rate (default 4% = US T-bill rate)
+            risk_free_rate: Annual risk-free rate. Default is 0% because crypto
+                            capital sitting idle earns nothing — comparing to
+                            T-bills is misleading for crypto trading strategies.
         """
         if self.equity.empty or len(self.equity) < 2:
             return 0.0
@@ -96,9 +123,10 @@ class BacktestMetrics:
         if len(hourly_returns) == 0 or hourly_returns.std() == 0:
             return 0.0
 
-        rf_hourly = risk_free_rate / 8760
-        excess = hourly_returns - rf_hourly
-        return float(excess.mean() / hourly_returns.std() * self.ANNUALIZATION_FACTOR)
+        ppy = self._periods_per_year()
+        rf_per_period = risk_free_rate / ppy
+        excess = hourly_returns - rf_per_period
+        return float(excess.mean() / hourly_returns.std() * math.sqrt(ppy))
 
     def max_drawdown(self) -> float:
         """

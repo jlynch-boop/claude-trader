@@ -12,6 +12,8 @@ import logging
 import os
 from datetime import datetime, timezone
 
+import pandas as pd
+
 
 def get_logger(name: str, level: int = logging.INFO) -> logging.Logger:
     """
@@ -96,6 +98,39 @@ def datetime_to_ts(dt: datetime) -> int:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return int(dt.timestamp() * 1000)
+
+
+def resample_ohlcv(df: pd.DataFrame, freq: str) -> pd.DataFrame:
+    """
+    Resample an OHLCV DataFrame to a lower frequency.
+
+    Useful for converting hourly data to daily candles so you can run
+    strategies with classic daily-timeframe parameters (BB=20, RSI=14,
+    SMA=50 all meaning days instead of hours).
+
+    Args:
+        df:   DataFrame with columns [open, high, low, close, volume]
+              and a DatetimeIndex (UTC-aware).
+        freq: Pandas resample frequency string.
+              '1D' = calendar day  (midnight UTC boundary)
+              '1W' = week starting Sunday
+              Examples that work: '1D', '4h', '1W'
+
+    Returns:
+        Resampled DataFrame with the same columns, NaN rows dropped.
+
+    Example:
+        daily_df = resample_ohlcv(hourly_df, '1D')
+    """
+    resampled = df.resample(freq).agg({
+        "open":   "first",
+        "high":   "max",
+        "low":    "min",
+        "close":  "last",
+        "volume": "sum",
+    })
+    # Drop incomplete periods (where the first candle was NaN)
+    return resampled.dropna(subset=["close"])
 
 
 def date_str_to_ts(date_str: str) -> int:

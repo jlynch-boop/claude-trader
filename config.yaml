@@ -25,21 +25,28 @@ risk:
 
 strategies:
   bollinger_rsi:
-    bb_period: 20           # Bollinger Band lookback period
-    bb_std: 2.0             # Bollinger Band standard deviation multiplier
-    rsi_period: 14          # RSI lookback period
-    rsi_oversold: 30        # RSI level to trigger buy signal
-    rsi_overbought: 70      # RSI level to trigger sell signal
+    # Parameters calibrated for DAILY candles (use: python scripts/run_backtest.py --resample 1D)
+    # These are "classic" values — BB=20 days, RSI=14 days, trend=50 days (the famous daily SMA)
+    bb_period: 20              # 20-day Bollinger Band lookback
+    bb_std: 2.0                # Bollinger Band standard deviation multiplier
+    rsi_period: 14             # 14-day RSI
+    rsi_oversold: 30           # Classic daily oversold threshold
+    rsi_overbought: 70         # Classic daily overbought threshold
+    atr_period: 14             # 14-day ATR for stop sizing
+    atr_stop_multiplier: 3.0   # Stop = entry - (ATR × 3); TP = entry + (ATR × 6) → 2:1 R:R
+    trend_ma: 50               # Buy only above the 50-day SMA (major trend filter)
 
   momentum:
-    fast_ma: 10             # Fast SMA period
-    slow_ma: 30             # Slow SMA period
-    trend_ma: 200           # Long-term trend filter SMA period
-    atr_period: 14          # ATR period for stop loss calculation
-    atr_stop_multiplier: 2.0  # Stop = entry - (ATR * multiplier)
+    # Parameters calibrated for DAILY candles (use: --resample 1D)
+    fast_ma: 10                # 10-day fast SMA
+    slow_ma: 30                # 30-day slow SMA
+    trend_ma: 50               # 50-day trend filter (price must be above this to buy)
+    atr_period: 14             # 14-day ATR for stop loss
+    atr_stop_multiplier: 2.0   # Stop = entry - (ATR * multiplier)
 
   grid:
-    grid_levels: 10         # Number of buy/sell grid levels
-    grid_spread_pct: 0.02   # 2% price distance between grid levels
-    pair: BTC/USDT          # Grid works best focused on one pair
-    range_pct: 0.10         # Total grid range as % of price (5% above and below)
+    # Grid doesn't benefit from resampling (it's already timeframe-agnostic)
+    grid_levels: 10            # Number of buy/sell grid levels
+    grid_spread_pct: 0.02      # 2% price distance between grid levels
+    pair: BTC/USDT             # Grid works best focused on one pair
+    range_pct: 0.20            # Total grid range (±10% around center)
