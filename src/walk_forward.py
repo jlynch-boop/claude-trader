@@ -300,7 +300,7 @@ class WalkForwardValidator:
         total_oos_trades = sum(wr.oos_n_trades for wr in window_results)
         overfit_windows  = sum(1 for wr in window_results if wr.overfit_warning)
 
-        passes_gate = (
+        passes_gate = bool(
             avg_oos_sharpe   >= OOS_MIN_SHARPE
             and avg_oos_drawdown <= OOS_MAX_DRAWDOWN
             and total_oos_trades >= 10   # At least some OOS trades

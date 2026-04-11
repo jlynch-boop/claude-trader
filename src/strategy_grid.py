@@ -17,27 +17,37 @@ If price breaks strongly in one direction and exits the grid range,
 we stop trading and close all positions (circuit breaker). Without this,
 a strong downtrend could trap many buy positions at a loss.
 
+**ADX regime filter (key improvement):**
+The Average Directional Index (ADX) measures trend strength (not direction).
+ADX < 25 means the market is ranging — exactly when grid trading works.
+ADX > 25 means the market is trending — exactly when grid trading fails.
+When ADX >= adx_threshold, we skip new buy entries. Active positions can
+still be closed (take profit or circuit breaker). We resume entering when
+ADX falls back below the threshold.
+
 **Trade logic:**
   SETUP: On the first candle, define a grid:
     - Center = current price
-    - Range  = center ± (range_pct / 2)   e.g. ±5%
+    - Range  = center ± (range_pct / 2)   e.g. ±10%
     - Place grid_levels evenly within the range
-    - Even levels: buy levels. Odd levels: sell levels.
 
   Each tick:
-    - If price crosses below a buy level → BUY signal
-    - If we have an open position and price crosses above next sell level → SELL
-    - If price exits the grid range → SELL all and reset grid (circuit breaker)
+    - If ADX < adx_threshold AND price crosses below a buy level → BUY
+    - If in position and price crosses above next sell level → SELL (profit)
+    - If price exits the grid range → SELL and reset (circuit breaker)
 
 **Config params (from config.yaml → strategies → grid):**
-  grid_levels:      10   Number of price levels in the grid
+  grid_levels:      10    Number of price levels in the grid
   grid_spread_pct:  0.02  Distance between levels as % of price (2%)
-  range_pct:        0.10  Total grid range as fraction (10% = ±5%)
+  range_pct:        0.20  Total grid range as fraction (20% = ±10%)
+  adx_threshold:    25    Only enter new positions when ADX < this value
+  adx_period:       14    ADX lookback period
 """
 
 import pandas as pd
 
 from src.strategy_base import Strategy, Signal
+from src.indicators import adx as compute_adx
 from src.utils import get_logger
 
 logger = get_logger(__name__)
@@ -54,9 +64,11 @@ class GridStrategy(Strategy):
     def __init__(self, config: dict):
         super().__init__(config)
         params = config["strategies"]["grid"]
-        self.grid_levels    = params["grid_levels"]      # e.g. 10
-        self.grid_spread    = params["grid_spread_pct"]  # e.g. 0.02 (2%)
-        self.range_pct      = params["range_pct"]        # e.g. 0.10 (10%)
+        self.grid_levels    = params["grid_levels"]                   # e.g. 10
+        self.grid_spread    = params["grid_spread_pct"]               # e.g. 0.02 (2%)
+        self.range_pct      = params["range_pct"]                     # e.g. 0.20 (20%)
+        self.adx_threshold  = params.get("adx_threshold", 25)        # e.g. 25
+        self.adx_period     = params.get("adx_period", 14)           # e.g. 14
         self.pair           = params.get("pair",
                               config["trading"]["pairs"][0])
 
@@ -73,14 +85,25 @@ class GridStrategy(Strategy):
         self._sell_level:    float = 0.0       # Price at which to take profit
 
     def required_history(self) -> int:
-        """Grid needs very little history — just 5 candles to stabilize."""
-        return 5
+        """
+        Need enough candles for ADX to warm up.
+        ADX requires 2×period to stabilize (one period for DM smoothing,
+        one for DX smoothing).
+        """
+        return self.adx_period * 2 + 5
 
     def on_candle(self, candle: pd.Series, history: pd.DataFrame) -> Signal:
         """
-        Check grid levels and return BUY, SELL, or HOLD.
+        Check ADX regime filter, then grid levels.
+        Only enters new positions when ADX < adx_threshold (ranging market).
         """
         current_price = candle["close"]
+
+        # Compute ADX to determine market regime
+        adx_values    = compute_adx(history["high"], history["low"],
+                                    history["close"], self.adx_period)
+        current_adx   = adx_values.iloc[-1]
+        in_ranging    = pd.isna(current_adx) or current_adx < self.adx_threshold
 
         # Initialize grid on first eligible candle
         if not self._grid_initialized:
@@ -88,7 +111,7 @@ class GridStrategy(Strategy):
             self._prev_price = current_price
             return Signal.hold(reason="Grid initialized")
 
-        signal = self._evaluate_grid(current_price)
+        signal = self._evaluate_grid(current_price, allow_new_entry=in_ranging)
         self._prev_price = current_price
         return signal
 
@@ -125,7 +148,8 @@ class GridStrategy(Strategy):
             f"{len(levels)} levels"
         )
 
-    def _evaluate_grid(self, current_price: float) -> Signal:
+    def _evaluate_grid(self, current_price: float,
+                       allow_new_entry: bool = True) -> Signal:
         """Check price against grid levels and return appropriate signal."""
 
         # --- Circuit breaker: price exited the grid range ---
@@ -156,8 +180,8 @@ class GridStrategy(Strategy):
                 ),
             )
 
-        # --- BUY: if not in position and price crossed below a buy level ---
-        if not self._in_position:
+        # --- BUY: if not in position, price crossed a level, AND ADX allows ---
+        if not self._in_position and allow_new_entry:
             # Find the buy level the price just crossed below
             for i, level in enumerate(self._grid_levels):
                 if (self._prev_price > level >= current_price

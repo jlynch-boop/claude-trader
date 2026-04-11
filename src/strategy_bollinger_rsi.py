@@ -3,46 +3,42 @@ strategy_bollinger_rsi.py — Mean reversion strategy using Bollinger Bands + RS
 
 **The idea:**
 When price moves far from its average (touches the lower Bollinger Band)
-AND momentum confirms it's oversold (RSI < 30), the price has probably
-moved too far and is likely to snap back. We buy there and sell when it
-snaps back to the other extreme.
+AND momentum confirms it's oversold (RSI < rsi_oversold), the price has
+probably moved too far and is likely to snap back to the mean.
 
-**Trend filter (key improvement):**
-We only buy dips when we're already in an uptrend (price > trend_ma SMA).
-Buying dips in a downtrend is "catching a falling knife" — the dip just
-keeps going. The trend filter eliminates most of these losing trades.
-
-**Trade logic:**
+**Entry:**
   BUY when:
     - Close price ≤ lower Bollinger Band (price at statistical extreme low)
     - RSI < rsi_oversold (30) — momentum confirms oversold condition
-    - Price is ABOVE trend_ma SMA (we're in an uptrend — dip is buyable)
     - No open position in this pair
 
-  SELL when:
-    - Close price ≥ upper Bollinger Band AND RSI > rsi_overbought
-    OR
-    - Stop loss / take profit hit (handled by the backtest engine)
+**Exit — take profit (mean reversion target):**
+  The natural target for mean reversion is the MIDDLE band (the SMA of the
+  Bollinger Band period). This is much more achievable than the upper band:
+    - Lower band → middle band = 1 standard deviation (~5-10% on daily BTC)
+    - Lower band → upper band = 2 standard deviations (~10-20% on daily BTC)
+  By targeting the middle band, we exit as soon as the "snap-back" completes
+  rather than waiting for a full overbought extreme that may take much longer.
 
-**Stop loss:**
+**Exit — stop loss:**
   atr_stop_multiplier × ATR below entry. ATR adapts to current volatility.
-  Default 3.0× ATR — wider than before to survive normal intra-candle noise.
-  BTC hourly ATR ≈ 0.5-2% of price, so stop is ~1.5-6% below entry.
+  Default 2.0× ATR to keep losses tight when the mean reversion fails.
 
-**Take profit:**
-  atr_stop_multiplier × 2 × ATR above entry (2:1 reward:risk).
-  Exits at a fixed distance rather than waiting for the full upper BB touch
-  which may take too long during sideways markets.
+**Trend filter (optional, disabled by default):**
+  When trend_ma > 0, only buy dips when price is above the trend MA.
+  NOTE: This filter is often too restrictive — RSI<30 means price is already
+  in a downswing, which usually puts it below any short-term MA. Use with care
+  or set trend_ma = 0 (disabled) for pure mean reversion.
 
 **Config params (from config.yaml → strategies → bollinger_rsi):**
-  bb_period:            20   Bollinger Band lookback
+  bb_period:            20   Bollinger Band lookback (default: days on daily data)
   bb_std:               2.0  Standard deviations for band width
   rsi_period:           14   RSI lookback
   rsi_oversold:         30   RSI buy threshold
-  rsi_overbought:       70   RSI sell threshold
-  atr_period:           14   ATR lookback for stop/TP sizing
-  atr_stop_multiplier:  3.0  Stop = entry - (ATR × multiplier)
-  trend_ma:             50   Only BUY when price > this SMA (trend filter)
+  rsi_overbought:       70   RSI sell threshold (for the upper-band SELL signal)
+  atr_period:           14   ATR lookback for stop sizing
+  atr_stop_multiplier:  2.0  Stop = entry - (ATR × multiplier)
+  trend_ma:             0    Only BUY when price > this SMA (0 = disabled)
 """
 
 import pandas as pd
@@ -53,7 +49,10 @@ from src.indicators import bollinger_bands, rsi, atr, sma
 
 class BollingerRsiStrategy(Strategy):
     """
-    Mean reversion using Bollinger Bands + RSI + trend filter.
+    Mean reversion using Bollinger Bands + RSI.
+
+    Buys at the lower band when oversold; exits at the middle band (mean
+    reversion confirmed) or when stop loss is hit.
 
     Parameters are read from config['strategies']['bollinger_rsi'].
     """
@@ -61,19 +60,18 @@ class BollingerRsiStrategy(Strategy):
     def __init__(self, config: dict):
         super().__init__(config)
         params = config["strategies"]["bollinger_rsi"]
-        self.bb_period      = params["bb_period"]                      # e.g. 20
-        self.bb_std         = params["bb_std"]                         # e.g. 2.0
-        self.rsi_period     = params["rsi_period"]                     # e.g. 14
-        self.rsi_oversold   = params["rsi_oversold"]                   # e.g. 30
-        self.rsi_overbought = params["rsi_overbought"]                 # e.g. 70
-        self.atr_period     = params.get("atr_period", 14)             # e.g. 14
-        self.atr_multiplier = params.get("atr_stop_multiplier", 3.0)  # e.g. 3.0
-        self.trend_ma       = params.get("trend_ma", 50)               # e.g. 50
+        self.bb_period      = params["bb_period"]                     # e.g. 20
+        self.bb_std         = params["bb_std"]                        # e.g. 2.0
+        self.rsi_period     = params["rsi_period"]                    # e.g. 14
+        self.rsi_oversold   = params["rsi_oversold"]                  # e.g. 30
+        self.rsi_overbought = params["rsi_overbought"]                # e.g. 70
+        self.atr_period     = params.get("atr_period", 14)            # e.g. 14
+        self.atr_multiplier = params.get("atr_stop_multiplier", 2.0)  # e.g. 2.0
+        self.trend_ma       = params.get("trend_ma", 0)               # 0 = disabled
 
     def required_history(self) -> int:
         """
         Need enough candles for all indicators to warm up.
-        The trend MA is typically the longest, so it sets the minimum.
         When trend_ma = 0 the filter is disabled and doesn't add warmup.
         """
         base = max(self.bb_period, self.rsi_period, self.atr_period)
@@ -83,7 +81,11 @@ class BollingerRsiStrategy(Strategy):
 
     def on_candle(self, candle: pd.Series, history: pd.DataFrame) -> Signal:
         """
-        Evaluate Bollinger Bands + RSI + trend filter on the current candle.
+        Evaluate Bollinger Bands + RSI on the current candle.
+
+        BUY at lower band + oversold RSI.
+        Take profit targets the middle band (mean reversion complete).
+        Stop loss is ATR-based.
 
         Returns BUY, SELL, or HOLD.
         """
@@ -96,19 +98,19 @@ class BollingerRsiStrategy(Strategy):
         rsi_values           = rsi(close, self.rsi_period)
         atr_values           = atr(high, low, close, self.atr_period)
 
-        current_close = candle["close"]
-        current_rsi   = rsi_values.iloc[-1]
-        current_upper = upper.iloc[-1]
-        current_lower = lower.iloc[-1]
-        current_atr   = atr_values.iloc[-1]
+        current_close  = candle["close"]
+        current_rsi    = rsi_values.iloc[-1]
+        current_upper  = upper.iloc[-1]
+        current_lower  = lower.iloc[-1]
+        current_middle = middle.iloc[-1]   # Mean reversion target
+        current_atr    = atr_values.iloc[-1]
 
         # Need core indicators to be valid
         if pd.isna(current_rsi) or pd.isna(current_lower) or pd.isna(current_atr):
             return Signal.hold(reason="indicators not yet warmed up")
 
-        # --- Trend filter (only active when trend_ma > 0) ---
-        # Only buy dips when price is above the trend MA (uptrend confirmed).
-        # When trend_ma = 0, the filter is disabled (buys in any direction).
+        # --- Optional trend filter ---
+        # Only active when trend_ma > 0. When disabled, trades in any direction.
         if self.trend_ma > 0:
             trend_values  = sma(close, self.trend_ma)
             current_trend = trend_values.iloc[-1]
@@ -116,7 +118,8 @@ class BollingerRsiStrategy(Strategy):
                 return Signal.hold(reason="trend MA not yet warmed up")
             in_uptrend = current_close > current_trend
         else:
-            in_uptrend = True  # filter disabled
+            in_uptrend    = True   # filter disabled
+            current_trend = None
 
         # --- BUY condition ---
         price_at_lower = current_close <= current_lower
@@ -124,11 +127,15 @@ class BollingerRsiStrategy(Strategy):
 
         if price_at_lower and rsi_oversold and in_uptrend:
             stop_loss   = current_close - (self.atr_multiplier * current_atr)
-            stop_loss   = max(stop_loss, current_close * 0.85)  # Hard floor at -15%
-            take_profit = current_close + (self.atr_multiplier * 2 * current_atr)
+            stop_loss   = max(stop_loss, current_close * 0.85)  # Hard floor -15%
+
+            # Take profit = middle band (the SMA, natural mean reversion target)
+            # This is ~1 std deviation above entry — much more achievable than
+            # the 6×ATR target (which could be 2-3× beyond the middle band)
+            take_profit = current_middle
 
             trend_info = (
-                f" [trend: {current_close:.0f} > {current_trend:.0f}]"
+                f" [above {current_trend:.0f} SMA{self.trend_ma}]"
                 if self.trend_ma > 0 else ""
             )
             return Signal.buy(
@@ -136,10 +143,16 @@ class BollingerRsiStrategy(Strategy):
                 price=current_close,
                 stop_loss=stop_loss,
                 take_profit=take_profit,
-                reason=f"BB lower + RSI {current_rsi:.1f} oversold{trend_info}",
+                reason=(
+                    f"BB lower + RSI {current_rsi:.1f} oversold"
+                    f"{trend_info}"
+                    f" → TP at middle band {current_middle:.0f}"
+                ),
             )
 
         # --- SELL condition ---
+        # Also generate a sell signal when price hits the upper band + overbought RSI
+        # (handles the case where price overshoots the middle band target)
         price_at_upper = current_close >= current_upper
         rsi_overbought = current_rsi > self.rsi_overbought
 
@@ -147,9 +160,7 @@ class BollingerRsiStrategy(Strategy):
             return Signal.sell(
                 pair=self._get_pair(),
                 price=current_close,
-                reason=(
-                    f"BB upper + RSI {current_rsi:.1f} overbought"
-                ),
+                reason=f"BB upper + RSI {current_rsi:.1f} overbought",
             )
 
         return Signal.hold()

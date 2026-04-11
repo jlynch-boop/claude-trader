@@ -6,7 +6,7 @@ trading:
   pairs:
     - BTC/USDT
     - ETH/USDT
-  timeframe: 1h          # Candle interval: 1m, 5m, 15m, 1h, 4h, 1d
+  timeframe: 1h          # Candle interval for raw data stored in DB
   starting_capital: 1000.0
 
 backtest:
@@ -25,28 +25,36 @@ risk:
 
 strategies:
   bollinger_rsi:
-    # Parameters calibrated for DAILY candles (use: python scripts/run_backtest.py --resample 1D)
-    # These are "classic" values — BB=20 days, RSI=14 days, trend=50 days (the famous daily SMA)
+    # Run with: python scripts/run_backtest.py --strategy bollinger_rsi --resample 1D
+    # Classic daily-timeframe parameters. TP targets the middle band (SMA-20),
+    # which is the natural mean-reversion target — much more achievable than
+    # the upper band or a fixed ATR multiple.
     bb_period: 20              # 20-day Bollinger Band lookback
-    bb_std: 2.0                # Bollinger Band standard deviation multiplier
+    bb_std: 2.0                # Band width in standard deviations
     rsi_period: 14             # 14-day RSI
-    rsi_oversold: 30           # Classic daily oversold threshold
-    rsi_overbought: 70         # Classic daily overbought threshold
+    rsi_oversold: 30           # Buy threshold (classic daily oversold)
+    rsi_overbought: 70         # Upper-band sell threshold
     atr_period: 14             # 14-day ATR for stop sizing
-    atr_stop_multiplier: 3.0   # Stop = entry - (ATR × 3); TP = entry + (ATR × 6) → 2:1 R:R
-    trend_ma: 50               # Buy only above the 50-day SMA (major trend filter)
+    atr_stop_multiplier: 2.0   # Stop = entry - (ATR × 2); TP = middle BB
+    trend_ma: 0                # 0 = disabled (trend filter blocks oversold signals)
 
   momentum:
-    # Parameters calibrated for DAILY candles (use: --resample 1D)
-    fast_ma: 10                # 10-day fast SMA
-    slow_ma: 30                # 30-day slow SMA
-    trend_ma: 50               # 50-day trend filter (price must be above this to buy)
+    # Run with: --resample 1D
+    # Sweep result: fast=3/slow=15 gives best quality (Sharpe 0.957, PF 2.988) on daily BTC.
+    # Trade count (12) still below 30-trade gate — 2024-26 bull run limits crossover frequency.
+    fast_ma: 3                 # 3-day fast SMA (sweep best: Sharpe 0.957, PF 2.988)
+    slow_ma: 15                # 15-day slow SMA
+    trend_ma: 50               # 50-day trend filter (only buy above 50-day SMA)
     atr_period: 14             # 14-day ATR for stop loss
-    atr_stop_multiplier: 2.0   # Stop = entry - (ATR * multiplier)
+    atr_stop_multiplier: 2.0   # Stop = entry - (ATR × 2)
 
   grid:
-    # Grid doesn't benefit from resampling (it's already timeframe-agnostic)
+    # Run with: --resample 1D
+    # ADX regime filter: only trade when ADX < adx_threshold (ranging market).
+    # This avoids the large circuit-breaker losses that happen during strong trends.
     grid_levels: 10            # Number of buy/sell grid levels
     grid_spread_pct: 0.02      # 2% price distance between grid levels
     pair: BTC/USDT             # Grid works best focused on one pair
     range_pct: 0.20            # Total grid range (±10% around center)
+    adx_threshold: 35          # Only enter when ADX < 35 (sweep: 41 trades, PF 1.362 at thr=35)
+    adx_period: 14             # 14-day ADX lookback

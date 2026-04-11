@@ -11,16 +11,18 @@ Indicators provided:
   - rsi(series, period)          — Relative Strength Index
   - bollinger_bands(series, ...) — Bollinger Bands (upper, middle, lower)
   - atr(high, low, close, ...)   — Average True Range
+  - adx(high, low, close, ...)   — Average Directional Index (trend strength)
   - macd(series, ...)            — MACD line, signal line, histogram
 
 Usage:
     import pandas as pd
-    from src.indicators import sma, rsi, bollinger_bands
+    from src.indicators import sma, rsi, bollinger_bands, adx
 
     df = pd.DataFrame(...)  # OHLCV DataFrame
     df["sma_20"] = sma(df["close"], 20)
     df["rsi_14"] = rsi(df["close"], 14)
     upper, middle, lower = bollinger_bands(df["close"], 20, 2.0)
+    df["adx_14"] = adx(df["high"], df["low"], df["close"], 14)
 """
 
 import pandas as pd
@@ -173,6 +175,80 @@ def atr(high: pd.Series, low: pd.Series, close: pd.Series,
 
     # Wilder's ATR smoothing (same as RSI's avg gain/loss smoothing)
     return true_range.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+
+
+def adx(high: pd.Series, low: pd.Series, close: pd.Series,
+        period: int = 14) -> pd.Series:
+    """
+    Average Directional Index — measures trend STRENGTH, not direction.
+
+    What it tells you:
+      - ADX < 25: Market is ranging / sideways (grid trading, mean reversion work)
+      - ADX 25-50: Market is trending (momentum strategies work)
+      - ADX > 50: Very strong trend (rare)
+
+    This is purely about how strong the current move is, regardless of whether
+    it's up or down. A falling market in a strong downtrend has high ADX just
+    like a rising market in a strong uptrend.
+
+    Math (Wilder's method):
+      1. True Range (TR) = max(H-L, |H-C_prev|, |L-C_prev|)
+      2. +DM = H - H_prev  if  H - H_prev > L_prev - L  AND  H - H_prev > 0
+         -DM = L_prev - L  if  L_prev - L > H - H_prev  AND  L_prev - L > 0
+      3. Smooth TR, +DM, -DM using Wilder's EMA (alpha = 1/period)
+      4. +DI = 100 × Smoothed(+DM) / Smoothed(TR)
+         -DI = 100 × Smoothed(-DM) / Smoothed(TR)
+      5. DX  = 100 × |+DI - -DI| / (+DI + -DI)
+      6. ADX = Wilder's EMA of DX
+
+    Args:
+        high:   Series of high prices.
+        low:    Series of low prices.
+        close:  Series of close prices.
+        period: Lookback period (default 14, the standard).
+
+    Returns:
+        Series of ADX values (0-100). Higher = stronger trend.
+        First ~2×period values will be NaN while warming up.
+    """
+    prev_close = close.shift(1)
+
+    # True Range (same as ATR)
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low  - prev_close).abs(),
+    ], axis=1).max(axis=1)
+
+    # Raw directional movement
+    up_move   = high.diff()
+    down_move = -low.diff()
+
+    # +DM: upward move is dominant and positive; otherwise 0
+    dm_plus  = up_move.where(
+        (up_move > down_move) & (up_move > 0), 0.0
+    )
+    # -DM: downward move is dominant and positive; otherwise 0
+    dm_minus = down_move.where(
+        (down_move > up_move) & (down_move > 0), 0.0
+    )
+
+    # Wilder smoothing (alpha = 1/period — same method used for ATR and RSI)
+    alpha = 1.0 / period
+    tr_s   = tr.ewm(alpha=alpha, adjust=False, min_periods=period).mean()
+    dmp_s  = dm_plus.ewm(alpha=alpha, adjust=False, min_periods=period).mean()
+    dmm_s  = dm_minus.ewm(alpha=alpha, adjust=False, min_periods=period).mean()
+
+    # Directional indicators (expressed as % of ATR)
+    di_plus  = 100.0 * dmp_s / tr_s.replace(0, np.nan)
+    di_minus = 100.0 * dmm_s / tr_s.replace(0, np.nan)
+
+    # DX: how much do +DI and -DI diverge?
+    denom = (di_plus + di_minus).replace(0, np.nan)
+    dx = 100.0 * (di_plus - di_minus).abs() / denom
+
+    # ADX: smooth DX one more time
+    return dx.ewm(alpha=alpha, adjust=False, min_periods=period).mean()
 
 
 def macd(series: pd.Series, fast: int = 12, slow: int = 26,

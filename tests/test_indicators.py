@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.indicators import sma, ema, rsi, bollinger_bands, atr, macd, percent_b
+from src.indicators import sma, ema, rsi, bollinger_bands, atr, adx, macd, percent_b
 
 
 # ---------------------------------------------------------------------------
@@ -280,3 +280,73 @@ def test_percent_b_at_lower():
     lower = pd.Series([90.0] * 50)
     result = percent_b(prices, upper, lower)
     assert result.iloc[-1] == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# ADX tests
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def trending_ohlc():
+    """Strong uptrend: each candle's high/low/close all rise steadily."""
+    n = 60
+    close = pd.Series([100.0 + i * 2 for i in range(n)])
+    high  = close + 1.0
+    low   = close - 1.0
+    return high, low, close
+
+
+@pytest.fixture
+def ranging_ohlc():
+    """Sideways market oscillating between 98 and 102."""
+    n = 60
+    prices = [100.0 + (2 if i % 4 < 2 else -2) for i in range(n)]
+    close  = pd.Series(prices)
+    high   = close + 0.5
+    low    = close - 0.5
+    return high, low, close
+
+
+def test_adx_returns_series(trending_ohlc):
+    high, low, close = trending_ohlc
+    result = adx(high, low, close, period=14)
+    assert isinstance(result, pd.Series)
+    assert len(result) == len(close)
+
+
+def test_adx_range_0_to_100(trending_ohlc):
+    high, low, close = trending_ohlc
+    result = adx(high, low, close, period=14).dropna()
+    assert (result >= 0).all(), "ADX should never be negative"
+    assert (result <= 100).all(), "ADX should never exceed 100"
+
+
+def test_adx_high_in_strong_trend(trending_ohlc):
+    """A steadily rising market should produce ADX > 25 after warmup."""
+    high, low, close = trending_ohlc
+    result = adx(high, low, close, period=14).dropna()
+    assert result.iloc[-1] > 25, (
+        f"Expected ADX > 25 in strong trend, got {result.iloc[-1]:.1f}"
+    )
+
+
+def test_adx_low_in_ranging_market(ranging_ohlc):
+    """An oscillating market should produce ADX < 25 after warmup."""
+    high, low, close = ranging_ohlc
+    result = adx(high, low, close, period=14).dropna()
+    assert result.iloc[-1] < 30, (
+        f"Expected ADX < 30 in ranging market, got {result.iloc[-1]:.1f}"
+    )
+
+
+def test_adx_nan_during_warmup(trending_ohlc):
+    """First values should be NaN until enough data is available."""
+    high, low, close = trending_ohlc
+    result = adx(high, low, close, period=14)
+    assert result.iloc[0] != result.iloc[0], "First value should be NaN"
+
+
+def test_adx_length_preserved(trending_ohlc):
+    high, low, close = trending_ohlc
+    result = adx(high, low, close, period=14)
+    assert len(result) == len(close)

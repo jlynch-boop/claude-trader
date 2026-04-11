@@ -240,7 +240,8 @@ class TestGridStrategy:
 
     def test_required_history(self, config):
         s = GridStrategy(config)
-        assert s.required_history() == 5
+        # ADX requires 2×adx_period to warm up; default adx_period=14 → 33
+        assert s.required_history() == 33
 
     def test_first_candle_initializes_grid(self, config):
         s = GridStrategy(config)
